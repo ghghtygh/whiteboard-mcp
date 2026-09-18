@@ -2,6 +2,7 @@ import express from 'express'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createBoardMcpServer } from './server.js'
 import { PORT, WHITEBOARD_SERVICE_TOKEN } from './config.js'
+import { startBoardCleanup } from './cleanup.js'
 
 const app = express()
 app.use(express.json())
@@ -45,3 +46,5 @@ app.get('/readyz', (_req, res) => res.status(200).send('ok'))
 app.listen(PORT, () => {
   console.log(`whiteboard-mcp listening on :${PORT}`)
 })
+
+startBoardCleanup()

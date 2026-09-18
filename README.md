@@ -49,6 +49,8 @@ npm run dev             # http://localhost:3000/mcp
 | `WHITEBOARD_API_ORIGIN` | `http://localhost:8080` | whiteboard-server REST 베이스 URL |
 | `WHITEBOARD_SERVICE_TOKEN` | (필수) | 서비스 계정 PAT — 없으면 기동 시 즉시 실패한다 |
 | `PORT` | `3000` | 이 서버가 리슨할 포트 |
+| `BOARD_TTL_MINUTES` | `60` | 이만큼(분) 손대지 않은 보드는 자동 삭제 (1회용 보장) |
+| `CLEANUP_INTERVAL_MINUTES` | `10` | 자동 삭제 스윕 주기(분) |
 
 ### 헬스체크 (k8s probe)
 
@@ -94,20 +96,32 @@ curl -X POST https://wb.gpglab.site/api/v1/auth/tokens -H "Authorization: Bearer
 
 ### 왜 이게 "다른 사람 보드"로부터 안전한가
 
-MCP 클라이언트는 인증하지 않지만, 서버가 대신 쓰는 서비스 계정은 whiteboard-server 의
-일반 계정과 동일한 멤버십 규칙을 그대로 따른다 — `list_boards` 는 그 계정이 이미
-멤버인 보드만 보여준다(무작위로 다른 사람 보드를 나열/검색할 방법이 없음).
+whiteboard-server 의 `GET /boards/{id}` 는 "링크 공유"를 지원하려고 **멤버가 아니어도
+최초 조회 시 자동으로 editor 로 등록**한다(사람이 공유 링크를 여는 것과 같은 동작 —
+`BoardController`/`BoardService` 참고). export/import 도 내부적으로 이 조회를 거치므로,
+board id 하나만 알면(추측·유출) 서비스 계정이 그 보드에 자동으로 가입되어 버릴 수 있었다.
+그래서 `src/whiteboardClient.ts` 의 `assertMember()` 가 board 를 실제로 건드리기 전에
+"이미 멤버인 보드인가"를 확인하고, 아니면 즉시 거부한다 — `get_board`, `rename_board`,
+`delete_board`, 그리고 모든 콘텐츠 도구(export/import 를 거치는)가 이 검사를 통과해야
+한다. 이걸로 whiteboard-web 의 **일반 사용자 보드**는 완전히 격리된다.
 
-한 가지 더 막아야 하는 경로가 있었다: whiteboard-server 의 `GET /boards/{id}` 는
-"링크 공유"를 지원하려고 **멤버가 아니어도 최초 조회 시 자동으로 editor 로 등록**한다
-(사람이 공유 링크를 여는 것과 같은 동작 — `BoardController`/`BoardService` 참고). export/import
-도 내부적으로 이 조회를 거치므로, board id 하나만 알면(추측·유출) 서비스 계정이 그 보드에
-자동으로 가입되어 버릴 수 있었다. 그래서 `src/whiteboardClient.ts` 의 `assertMember()` 가
-board 를 실제로 건드리기 전에 "이미 멤버인 보드인가"를 `listBoards()` 로 먼저 확인하고,
-아니면 즉시 거부한다 — `get_board`, `rename_board`, `delete_board`, 그리고 모든 콘텐츠
-도구(export/import 를 거치는)가 이 검사를 통과해야 한다. `create_board` 로 만든 보드,
-또는 whiteboard-web 에서 이 서비스 계정을 명시적으로 멤버로 추가한 보드만 MCP 로
-접근할 수 있다.
+하지만 MCP 클라이언트는 인증하지 않고 **모두 같은 서비스 계정을 공유**하므로, 그
+자체만으로는 "MCP 로 만든 보드 A" 와 "MCP 로 만든 보드 B" 를 서로 다른 요청/사용자가
+구분 없이 볼 수 있다는 문제가 남는다(둘 다 같은 계정의 멤버이므로 `assertMember()` 를
+그냥 통과한다). 그래서 두 가지를 더한다:
+
+1. **`list_boards` 도구가 없다.** 서비스 계정이 멤버인 보드 전체를 나열할 방법이 MCP
+   표면에 없으므로, board id 를 모르면 애초에 어떤 보드도 특정할 수 없다. `create_board`
+   가 반환하는 id 는 오직 그 호출을 한 세션만 받는다 — 사실상 unguessable capability
+   token 이다(UUID, 무작위 추측 불가능).
+2. **1회용 — 자동 만료.** `BOARD_TTL_MINUTES`(기본 60분) 동안 아무도 손대지 않은(`updatedAt`
+   기준) 서비스 계정 보드는 `src/cleanup.ts` 가 주기적으로 지운다. id 가 어딘가(로그,
+   대화 이력 등)로 새더라도 노출 창이 제한된다.
+
+즉 "누구나 인증 없이 쓸 수 있다"와 "서로 다른 MCP 이용자의 결과물은 노출되지 않는다"를
+동시에 만족시키는 건 **발견 불가능한 id + 짧은 수명**이다 — 계정 격리가 아니다. 더 강한
+격리(진짜 사용자별 데이터 분리)가 필요해지면 계정당 하나의 서비스 계정을 발급하는 등
+인증 모델 자체를 바꿔야 한다.
 
 PAT 는 기본 180일 만료이며, 폐기(revoke)하면 즉시 무효화된다(JWT 와 달리 서버가 해시를
 대조해 검증하기 때문). 자세한 발급/검증 로직은 `../whiteboard-server` 의
@@ -115,8 +129,8 @@ PAT 는 기본 180일 만료이며, 폐기(revoke)하면 즉시 무효화된다(
 
 ## 제공 도구
 
-**보드 관리**: `list_boards`, `get_board`, `create_board`, `rename_board`, `delete_board`,
-`list_catalog`
+**보드 관리**: `get_board`, `create_board`, `rename_board`, `delete_board`, `list_catalog`
+(`list_boards` 는 의도적으로 없다 — 위 "왜 이게 안전한가" 참고)
 
 **보드 콘텐츠**: `get_board_content`,
 `create_node` / `move_node` / `set_node_label` / `delete_node`,

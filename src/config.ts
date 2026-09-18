@@ -18,3 +18,9 @@ if (!WHITEBOARD_SERVICE_TOKEN) {
       'account (see README “Authentication”) and set it as this env var before starting the server.',
   )
 }
+
+// 보드는 1회용이다 — list_boards 가 없어 발견은 막았지만, id 를 아는 채로 계속 남아있으면
+// 로그 유출 등으로 뒤늦게 노출될 여지가 있다. 그래서 일정 시간 손대지 않은(updatedAt 기준)
+// 서비스 계정 보드는 자동 삭제한다.
+export const BOARD_TTL_MINUTES = Number(process.env.BOARD_TTL_MINUTES ?? 60)
+export const CLEANUP_INTERVAL_MINUTES = Number(process.env.CLEANUP_INTERVAL_MINUTES ?? 10)
