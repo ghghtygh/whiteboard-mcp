@@ -79,12 +79,53 @@ npm run dev   # http://localhost:3000/mcp
 `create_graph`, `get_graph`,
 `add_node` / `move_node` / `set_node_label` / `remove_node`,
 `add_edge` / `set_edge_style` / `set_edge_direction` / `set_edge_label` / `remove_edge`,
-`add_group` / `move_group` / `set_group_label` / `remove_group`
+`add_group` / `move_group` / `set_group_label` / `remove_group`,
+`apply_operations` (배치 — 아래 참고)
 
 **부가 기능**: `list_catalog` (인증 불필요), `save_as_board` (호출자 본인 토큰 필요)
 
 노드 삭제 시 연결된 엣지 정리, 그룹 생성/이동 시 노드 자동 편입 같은 cross-cutting 규칙은
 `src/board/ops.ts` 안에서 보장된다 — 도구 핸들러가 직접 배열을 만지지 않는다.
+
+### 도구 설계 규칙
+
+- **`graph` 는 필수다.** 빈 문자열을 "새 그래프"로 받아주지 않는다 — `create_graph` 를
+  거치지 않고 실수로 빈 상태에서 다시 시작하는 사고를 막기 위해서다.
+- **잘못된 참조는 항상 명확한 에러다.** 존재하지 않는 노드/엣지/그룹 id, 카탈로그에 없는
+  `type`, 자기 자신에게 잇는 엣지 — 전부 `{isError: true}` + `CODE: message` 형태로
+  올라온다(`NODE_NOT_FOUND`, `EDGE_NOT_FOUND`, `GROUP_NOT_FOUND`, `UNKNOWN_COMPONENT_TYPE`,
+  `INVALID_EDGE`, `UNKNOWN_REF`, `GRAPH_TOKEN_REQUIRED`). `{ ok: false }` 를 조용히
+  돌려주는 경로는 없다.
+- **좌표 규약이 통일돼 있다.** `add_node`/`move_node` 는 둘 다 노드의 **중심** 좌표를
+  받는다. `add_group` 의 (x, y)는 좌상단, `move_group` 의 (dx, dy)는 상대 이동량이다
+  (그룹은 원래부터 "중심" 개념이 없어 그대로 뒀다) — 도구 description 과
+  `McpServer` 의 `instructions` 양쪽에 명시돼 있다.
+- **모든 도구가 `inputSchema` + `outputSchema` 를 선언**하고, 응답은 `content`(사람이
+  읽는 텍스트)와 `structuredContent`(그 outputSchema 를 따르는 실제 데이터) 둘 다
+  포함한다.
+- **`add_node` 의 `type` 은 카탈로그로 검증된다** — `list_catalog` 가 반환하지 않는
+  타입은 거부된다(내부적으로 카탈로그를 5분 캐싱해 매 호출마다 whiteboard-server 를
+  때리지 않는다).
+
+### `apply_operations` — 배치 + 임시 ref
+
+여러 노드/엣지/그룹을 한 번에 만들 때 `add_node`/`add_edge`/`...` 를 여러 번 왕복하는 대신
+쓴다. `add_node`/`add_edge`/`add_group` 항목에 `ref`(임의의 이름)를 붙이면, 같은 배치 안의
+뒤따르는 항목에서 실제 id 를 몰라도 `"$ref:<name>"` 으로 그걸 가리킬 수 있다:
+
+```json
+{
+  "graph": "...",
+  "operations": [
+    { "op": "add_node", "ref": "api", "type": "server", "x": 200, "y": 200 },
+    { "op": "add_node", "ref": "db", "type": "database", "x": 400, "y": 200 },
+    { "op": "add_edge", "from": "$ref:api", "to": "$ref:db" }
+  ]
+}
+```
+
+배치는 한 트랜잭션이다 — 중간에 하나라도 실패하면(알 수 없는 타입/ref/id 등) 그 시점까지의
+변경은 전부 버려지고 원래 `graph` 토큰은 그대로 유효하다(에러 응답엔 새 토큰이 없다).
 
 ## MCP 클라이언트 설정
 

@@ -1,13 +1,35 @@
 import { nanoid } from 'nanoid'
+import { notFound, GraphError } from './errors.js'
 import { NODE_H, NODE_W, snap } from './geometry.js'
 import type { GraphSnapshot } from './graphCodec.js'
-import type { Anchor, BoardEdge, BoardGroup, EdgeDirection, EdgeStyle } from './types.js'
+import type { Anchor, BoardEdge, BoardGroup, BoardNode, EdgeDirection, EdgeStyle } from './types.js'
 
-// whiteboard-web 의 src/canvas/ops.ts 와 같은 cross-cutting 규칙(노드 삭제 시 엣지 정리,
-// 그룹 생성/이동 시 노드 자동 편입)을 그대로 지키되, Yjs 문서가 아니라 인코딩/디코딩되는
-// 순수 GraphSnapshot(plain object) 위에서 동작한다 — 이 서버는 이제 어떤 그래프도
-// 서버에 들고 있지 않으므로 CRDT 가 필요 없다. 각 함수는 주어진 graph 를 그 자리에서
-// mutate 한다(호출자가 매 MCP 요청마다 새로 디코드한 객체를 넘기므로 안전하다).
+// whiteboard-web 의 src/canvas/ops.ts 와 같은 cross-cutting 규칙(엣지 정리, 그룹 자동 편입)을
+// 순수 GraphSnapshot(plain object) 위에서 지킨다 — 실시간 문서가 없으니 Yjs/CRDT 는 필요 없다.
+// 모든 함수는 존재하지 않는 id 를 받으면 조용히 무시하지 않고 GraphError 를 던진다 — 호출자
+// (MCP 도구)가 그 실패를 그대로 클라이언트 에러로 전달한다.
+//
+// 좌표 규약: addNode 와 moveNode 는 둘 다 노드의 "중심" 좌표를 받는다(원래 whiteboard-web 의
+// moveNode 는 저장 형식과 같은 좌상단을 받았지만, LLM 이 두 도구를 구분해서 기억할 이유가
+// 없어 이 서버에서는 통일했다). addGroup/moveGroup 은 원래부터 좌상단/델타라 그대로 둔다.
+
+function findNode(g: GraphSnapshot, id: string): BoardNode {
+  const node = g.nodes.find((n) => n.id === id)
+  if (!node) notFound('node', id)
+  return node
+}
+
+function findEdge(g: GraphSnapshot, id: string): BoardEdge {
+  const edge = g.edges.find((e) => e.id === id)
+  if (!edge) notFound('edge', id)
+  return edge
+}
+
+function findGroup(g: GraphSnapshot, id: string): BoardGroup {
+  const group = g.groups.find((x) => x.id === id)
+  if (!group) notFound('group', id)
+  return group
+}
 
 function containingGroup(groups: BoardGroup[], cx: number, cy: number): string | null {
   for (const g of groups) {
@@ -16,7 +38,7 @@ function containingGroup(groups: BoardGroup[], cx: number, cy: number): string |
   return null
 }
 
-/** x, y 는 노드 중심 좌표 — 드롭 지점 기준으로 상자를 배치하는 whiteboard-web 과 동일한 규약. */
+/** x, y 는 노드 중심 좌표. */
 export function addNode(g: GraphSnapshot, type: string, x: number, y: number, catalogVersion = 1): string {
   const id = nanoid(10)
   g.nodes.push({
@@ -31,30 +53,24 @@ export function addNode(g: GraphSnapshot, type: string, x: number, y: number, ca
   return id
 }
 
-/** x, y 는 노드 좌상단 좌표(저장 형식과 동일). 이동 후 그룹 소속을 자동 재계산한다. */
-export function moveNode(g: GraphSnapshot, id: string, x: number, y: number): boolean {
-  const node = g.nodes.find((n) => n.id === id)
-  if (!node) return false
-  node.x = snap(x)
-  node.y = snap(y)
-  node.groupId = containingGroup(g.groups, node.x + NODE_W / 2, node.y + NODE_H / 2)
-  return true
+/** x, y 는 노드 중심 좌표(addNode 와 동일한 규약). 이동 후 그룹 소속을 자동 재계산한다. */
+export function moveNode(g: GraphSnapshot, id: string, x: number, y: number): void {
+  const node = findNode(g, id)
+  node.x = snap(x - NODE_W / 2)
+  node.y = snap(y - NODE_H / 2)
+  node.groupId = containingGroup(g.groups, x, y)
 }
 
-export function setNodeLabel(g: GraphSnapshot, id: string, label: string): boolean {
-  const node = g.nodes.find((n) => n.id === id)
-  if (!node) return false
-  node.label = label.slice(0, 50)
-  return true
+export function setNodeLabel(g: GraphSnapshot, id: string, label: string): void {
+  findNode(g, id).label = label.slice(0, 50)
 }
 
-export function removeNode(g: GraphSnapshot, id: string): boolean {
+export function removeNode(g: GraphSnapshot, id: string): void {
   const idx = g.nodes.findIndex((n) => n.id === id)
-  if (idx === -1) return false
+  if (idx === -1) notFound('node', id)
   g.nodes.splice(idx, 1)
   // 끊긴 엣지도 함께 제거 — whiteboard-web 과 동일한 규칙.
   g.edges = g.edges.filter((e) => e.from !== id && e.to !== id)
-  return true
 }
 
 export function addEdge(
@@ -63,9 +79,10 @@ export function addEdge(
   to: string,
   fromAnchor: Anchor | null = null,
   toAnchor: Anchor | null = null,
-): string | null {
-  if (from === to) return null
-  if (!g.nodes.some((n) => n.id === from) || !g.nodes.some((n) => n.id === to)) return null
+): string {
+  if (from === to) throw new GraphError('Cannot connect a node to itself.', 'INVALID_EDGE')
+  if (!g.nodes.some((n) => n.id === from)) notFound('node', from)
+  if (!g.nodes.some((n) => n.id === to)) notFound('node', to)
   const id = nanoid(10)
   const edge: BoardEdge = {
     id,
@@ -81,32 +98,22 @@ export function addEdge(
   return id
 }
 
-export function setEdgeStyle(g: GraphSnapshot, id: string, style: EdgeStyle): boolean {
-  const edge = g.edges.find((e) => e.id === id)
-  if (!edge) return false
-  edge.style = style
-  return true
+export function setEdgeStyle(g: GraphSnapshot, id: string, style: EdgeStyle): void {
+  findEdge(g, id).style = style
 }
 
-export function setEdgeDirection(g: GraphSnapshot, id: string, direction: EdgeDirection): boolean {
-  const edge = g.edges.find((e) => e.id === id)
-  if (!edge) return false
-  edge.direction = direction
-  return true
+export function setEdgeDirection(g: GraphSnapshot, id: string, direction: EdgeDirection): void {
+  findEdge(g, id).direction = direction
 }
 
-export function setEdgeLabel(g: GraphSnapshot, id: string, label: string | null): boolean {
-  const edge = g.edges.find((e) => e.id === id)
-  if (!edge) return false
-  edge.label = label ? label.slice(0, 30) : null
-  return true
+export function setEdgeLabel(g: GraphSnapshot, id: string, label: string | null): void {
+  findEdge(g, id).label = label ? label.slice(0, 30) : null
 }
 
-export function removeEdge(g: GraphSnapshot, id: string): boolean {
+export function removeEdge(g: GraphSnapshot, id: string): void {
   const idx = g.edges.findIndex((e) => e.id === id)
-  if (idx === -1) return false
+  if (idx === -1) notFound('edge', id)
   g.edges.splice(idx, 1)
-  return true
 }
 
 export function addGroup(g: GraphSnapshot, x: number, y: number, width: number, height: number): string {
@@ -126,9 +133,8 @@ export function addGroup(g: GraphSnapshot, x: number, y: number, width: number, 
 }
 
 /** dx, dy 는 이동량(delta). 자식 노드도 함께 이동한다. */
-export function moveGroup(g: GraphSnapshot, id: string, dx: number, dy: number): boolean {
-  const group = g.groups.find((x) => x.id === id)
-  if (!group) return false
+export function moveGroup(g: GraphSnapshot, id: string, dx: number, dy: number): void {
+  const group = findGroup(g, id)
   group.x = snap(group.x + dx)
   group.y = snap(group.y + dy)
   for (const node of g.nodes) {
@@ -137,22 +143,17 @@ export function moveGroup(g: GraphSnapshot, id: string, dx: number, dy: number):
       node.y = snap(node.y + dy)
     }
   }
-  return true
 }
 
-export function setGroupLabel(g: GraphSnapshot, id: string, label: string | null): boolean {
-  const group = g.groups.find((x) => x.id === id)
-  if (!group) return false
-  group.label = label ? label.slice(0, 30) : null
-  return true
+export function setGroupLabel(g: GraphSnapshot, id: string, label: string | null): void {
+  findGroup(g, id).label = label ? label.slice(0, 30) : null
 }
 
-export function removeGroup(g: GraphSnapshot, id: string): boolean {
+export function removeGroup(g: GraphSnapshot, id: string): void {
   const idx = g.groups.findIndex((x) => x.id === id)
-  if (idx === -1) return false
+  if (idx === -1) notFound('group', id)
   g.groups.splice(idx, 1)
   for (const node of g.nodes) {
     if (node.groupId === id) node.groupId = null
   }
-  return true
 }

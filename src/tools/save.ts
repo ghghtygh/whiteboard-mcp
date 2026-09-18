@@ -22,6 +22,7 @@ export function registerSaveTools(server: McpServer) {
         title: z.string().min(1).describe('Title for the new board'),
         accessToken: z.string().describe('Your own whiteboard-web access token or PAT (wbpat_...)'),
       },
+      outputSchema: { boardId: z.string(), url: z.string() },
     },
     withErrorHandling(async ({ graph, title, accessToken }) => {
       const snapshot = graphToYjsSnapshotBase64(decodeGraph(graph))
