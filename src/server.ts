@@ -4,9 +4,10 @@ import { registerBoardTools } from './tools/boards.js'
 import { registerContentTools } from './tools/content.js'
 
 /**
- * 요청 하나마다 새 McpServer 를 만든다(stateless HTTP 모드). 그 요청의 Authorization 토큰을
- * 클로저로 도구 핸들러에 묶어서, 세션 맵 없이도 "이 도구 호출은 이 사용자 권한으로" 를
- * 자연스럽게 보장한다 — 모든 REST 호출은 결국 whiteboard-server 가 그 토큰으로 권한을 검사한다.
+ * 요청 하나마다 새 McpServer 를 만든다(stateless HTTP 모드) — MCP 프로토콜 특성상 요청 단위로
+ * 다루는 게 가장 단순해서다. token 은 항상 이 서버의 고정 서비스 계정 PAT (config.ts) 이며,
+ * MCP 클라이언트 자체는 인증하지 않는다. whiteboard-server 쪽 권한 검사(그 계정이 멤버인
+ * 보드인지)는 여전히 매 REST 호출마다 이뤄진다.
  */
 export function createBoardMcpServer(token: string): McpServer {
   const server = new McpServer({ name: 'whiteboard-mcp', version: '0.1.0' })
