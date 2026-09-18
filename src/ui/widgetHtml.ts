@@ -202,10 +202,12 @@ export const WIDGET_HTML = `<!doctype html>
           setViewBox(viewBox);
         });
         svg.addEventListener('pointerup', function () { dragging = false; svg.classList.remove('dragging'); });
+        var ZOOM_SENSITIVITY = 0.0005; // 작을수록 한 번에 덜 확대/축소됨
         svg.addEventListener('wheel', function (e) {
           e.preventDefault();
           var viewBox = parseViewBox();
-          var factor = e.deltaY > 0 ? 1.1 : 0.9;
+          var factor = Math.exp(e.deltaY * ZOOM_SENSITIVITY);
+          factor = Math.min(1.08, Math.max(0.92, factor)); // 트랙패드의 큰 deltaY 스파이크 방지
           var newW = viewBox.w * factor, newH = viewBox.h * factor;
           viewBox.x -= (newW - viewBox.w) / 2;
           viewBox.y -= (newH - viewBox.h) / 2;
