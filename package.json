@@ -16,12 +16,14 @@
     "@modelcontextprotocol/sdk": "^1.15.0",
     "express": "^4.21.1",
     "nanoid": "^5.1.11",
+    "pako": "^3.0.2",
     "yjs": "^13.6.20",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.7.9",
+    "@types/pako": "^2.0.4",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }
