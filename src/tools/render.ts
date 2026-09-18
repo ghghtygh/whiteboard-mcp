@@ -1,12 +1,23 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { decodeGraph } from '../board/graphCodec.js'
-import { viewUrl } from '../config.js'
+import { viewUrl, WHITEBOARD_WEB_ORIGIN } from '../config.js'
 import { edgeSchema, graphArg, groupSchema, nodeSchema } from './schemas.js'
 import { withErrorHandling } from './util.js'
 import { WIDGET_HTML } from '../ui/widgetHtml.js'
 
 const WIDGET_URI = 'ui://whiteboard/graph.html'
+
+/** 노드 아이콘 배지(색상+이니셜) — whiteboard-server 가 어떤 카탈로그 타입에든 항상 만들어주는
+ * 폴백 SVG다. 실제 브랜드 로고(devicon/simple-icons)는 whiteboard-web 번들 안에만 있어 이
+ * 위젯(정적 HTML, 빌드 단계 없음)에서는 못 쓴다 — 위젯은 항상 이 배지로 보인다. 위젯은
+ * whiteboard-server 를 직접 호출하지 않는 사용자 브라우저에서 도니, 클러스터 내부 전용인
+ * WHITEBOARD_API_ORIGIN 이 아니라 공개 오리진(WHITEBOARD_WEB_ORIGIN)의 /api 경로를 쓴다. */
+function iconUrl(type: string): string {
+  return `${WHITEBOARD_WEB_ORIGIN}/api/v1/icons/${encodeURIComponent(type)}.svg`
+}
+
+const widgetNodeSchema = nodeSchema.extend({ iconUrl: z.string() })
 
 /**
  * render_graph — 1차 스코프는 "뷰어만, 편집 없음"(ChatGPT Apps SDK 위젯, pan/zoom 만).
@@ -40,7 +51,7 @@ export function registerRenderTool(server: McpServer) {
       outputSchema: {
         graph: graphArg,
         url: z.string(),
-        nodes: z.array(nodeSchema),
+        nodes: z.array(widgetNodeSchema),
         edges: z.array(edgeSchema),
         groups: z.array(groupSchema),
       },
@@ -54,12 +65,13 @@ export function registerRenderTool(server: McpServer) {
     withErrorHandling(async ({ graph }) => {
       const decoded = decodeGraph(graph)
       const url = viewUrl(graph)
+      const nodes = decoded.nodes.map((node) => ({ ...node, iconUrl: iconUrl(node.type) }))
       const summary =
         `Whiteboard with ${decoded.nodes.length} node(s), ${decoded.edges.length} edge(s), ` +
         `${decoded.groups.length} group(s). Non-widget clients: open ${url} to view it.`
       return {
         content: [{ type: 'text', text: summary }],
-        structuredContent: { graph, url, ...decoded },
+        structuredContent: { graph, url, ...decoded, nodes },
       }
     }),
   )

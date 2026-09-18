@@ -24,6 +24,7 @@ export const WIDGET_HTML = `<!doctype html>
       svg { display: block; width: 100%; height: 100%; cursor: grab; }
       svg.dragging { cursor: grabbing; }
       .node-box { fill: #ffffff; stroke: #d7deea; stroke-width: 1.5; }
+      .node-icon { pointer-events: none; }
       .node-label { fill: #1f2937; font-size: 11px; text-anchor: middle; }
       .group-box { fill: rgba(93, 91, 239, 0.05); stroke: #5d5bef; stroke-width: 1.5; stroke-dasharray: 6 4; }
       .group-label { fill: #5d5bef; font-size: 11px; font-weight: 600; }
@@ -132,11 +133,22 @@ export const WIDGET_HTML = `<!doctype html>
           }
         });
 
+        var ICON_BOX = 56, ICON_PAD = 8;
         nodes.forEach(function (node) {
           var box = boxOf(node);
-          nodesG.appendChild(el('rect', { class: 'node-box', x: box.x, y: box.y, width: box.w, height: 56, rx: 10 }));
+          nodesG.appendChild(el('rect', { class: 'node-box', x: box.x, y: box.y, width: box.w, height: ICON_BOX, rx: 10 }));
+          if (node.iconUrl) {
+            var img = el('image', {
+              class: 'node-icon',
+              x: box.x + ICON_PAD, y: box.y + ICON_PAD,
+              width: ICON_BOX - ICON_PAD * 2, height: ICON_BOX - ICON_PAD * 2,
+              href: node.iconUrl,
+            });
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.iconUrl); // 구형 렌더러 호환
+            nodesG.appendChild(img);
+          }
           nodesG.appendChild(el('text', {
-            class: 'node-label', x: box.cx, y: box.y + 56 + 16,
+            class: 'node-label', x: box.cx, y: box.y + ICON_BOX + 16,
           }, truncate(node.label || node.type, 22)));
           extend(box.x, box.y); extend(box.x + box.w, box.y + box.h);
         });
@@ -144,16 +156,35 @@ export const WIDGET_HTML = `<!doctype html>
         var pad = 40;
         var w = Math.max(100, maxX - minX + pad * 2);
         var h = Math.max(100, maxY - minY + pad * 2);
-        svg.setAttribute('viewBox', (minX - pad) + ' ' + (minY - pad) + ' ' + w + ' ' + h);
+        var fitted = { x: minX - pad, y: minY - pad, w: w, h: h };
+        svg.setAttribute('viewBox', fitted.x + ' ' + fitted.y + ' ' + fitted.w + ' ' + fitted.h);
+        // 줌아웃/팬으로 콘텐츠 밖의 빈 화면이 보이지 않게, 이 최초 "전체가 보이는" 범위를
+        // 넘어설 수 없는 한계로 고정한다. 확대(축소된 viewBox)는 자유롭다.
+        maxBounds = fitted;
       }
 
       // ── pan/zoom (읽기 전용 — 노드 드래그/생성/삭제 없음) ──
+      var maxBounds = null;
       (function setupPanZoom() {
         var svg = document.getElementById('stage');
-        var viewBox = null;
+        var MIN_SIZE = 60; // 과도한 확대 방지
         function parseViewBox() {
           var parts = (svg.getAttribute('viewBox') || '0 0 100 100').split(' ').map(Number);
           return { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+        }
+        // viewBox 가 항상 maxBounds(전체 콘텐츠+여백) 안에 완전히 들어오도록 clamp 한다 —
+        // 줌아웃해서 콘텐츠 밖 빈 화면이 보이거나, 그 상태로 팬해서 멀어지는 걸 막는다.
+        function clamp(vb) {
+          if (!maxBounds) return vb;
+          var w = Math.min(Math.max(vb.w, MIN_SIZE), maxBounds.w);
+          var h = Math.min(Math.max(vb.h, MIN_SIZE), maxBounds.h);
+          var x = w >= maxBounds.w ? maxBounds.x : Math.min(Math.max(vb.x, maxBounds.x), maxBounds.x + maxBounds.w - w);
+          var y = h >= maxBounds.h ? maxBounds.y : Math.min(Math.max(vb.y, maxBounds.y), maxBounds.y + maxBounds.h - h);
+          return { x: x, y: y, w: w, h: h };
+        }
+        function setViewBox(vb) {
+          vb = clamp(vb);
+          svg.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h);
         }
         var dragging = false, lastX = 0, lastY = 0;
         svg.addEventListener('pointerdown', function (e) {
@@ -163,22 +194,23 @@ export const WIDGET_HTML = `<!doctype html>
         });
         svg.addEventListener('pointermove', function (e) {
           if (!dragging) return;
-          viewBox = parseViewBox();
+          var viewBox = parseViewBox();
           var scale = viewBox.w / svg.clientWidth;
           viewBox.x -= (e.clientX - lastX) * scale;
           viewBox.y -= (e.clientY - lastY) * scale;
           lastX = e.clientX; lastY = e.clientY;
-          svg.setAttribute('viewBox', viewBox.x + ' ' + viewBox.y + ' ' + viewBox.w + ' ' + viewBox.h);
+          setViewBox(viewBox);
         });
         svg.addEventListener('pointerup', function () { dragging = false; svg.classList.remove('dragging'); });
         svg.addEventListener('wheel', function (e) {
           e.preventDefault();
-          viewBox = parseViewBox();
+          var viewBox = parseViewBox();
           var factor = e.deltaY > 0 ? 1.1 : 0.9;
           var newW = viewBox.w * factor, newH = viewBox.h * factor;
           viewBox.x -= (newW - viewBox.w) / 2;
           viewBox.y -= (newH - viewBox.h) / 2;
-          svg.setAttribute('viewBox', viewBox.x + ' ' + viewBox.y + ' ' + newW + ' ' + newH);
+          viewBox.w = newW; viewBox.h = newH;
+          setViewBox(viewBox);
         }, { passive: false });
       })();
 

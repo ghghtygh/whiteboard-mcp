@@ -170,6 +170,15 @@ npm run dev   # http://localhost:3000/mcp
   똑같진 않지만 구조는 동일하다.
 - **1차 스코프는 뷰어 전용이다** — pan(드래그)/zoom(휠)만 가능하고 노드 이동·생성·삭제는
   없다. 위젯에서 `move_node` 등을 다시 호출하는(양방향 편집) 건 2차 이후 과제로 남겨뒀다.
+- **아이콘은 whiteboard-server 의 색상+이니셜 폴백 배지**(`/api/v1/icons/{type}.svg`, 어떤
+  카탈로그 타입에도 항상 있음)를 쓴다. whiteboard-web 이 쓰는 실제 devicon/simple-icons
+  브랜드 로고는 그 앱의 빌드 번들 안에만 있어(공개 URL로 못 가져옴) 위젯에서는 재현할 수
+  없다. `render_graph` 가 각 노드에 `iconUrl` 을 붙여 반환한다 — 클러스터 내부 전용인
+  `WHITEBOARD_API_ORIGIN` 이 아니라 공개 오리진(`WHITEBOARD_WEB_ORIGIN`)의 `/api` 경로로
+  만든다(위젯은 사용자 브라우저에서 도니까).
+- **pan/zoom 은 콘텐츠 전체가 보이는 범위 밖으로 못 나간다** — 줌아웃/팬으로 빈 화면이
+  보이는 걸 막으려고, 최초 "전체가 딱 맞게 보이는" viewBox 를 넘어서는 이동/축소를
+  `widgetHtml.ts` 의 `clamp()` 가 막는다. 확대(그 반대 방향)는 제한 없다.
 - 위젯은 `window.openai.toolOutput` (render_graph 가 반환한 structuredContent)에서 데이터를
   읽는다. **이 계약(정확한 전역 객체/이벤트 이름)은 이 저장소 환경에서 OpenAI 의 라이브
   문서를 fetch 할 수 없어 학습 시점 지식 기준으로 작성했다** — ChatGPT 에서 실제로 확인해
