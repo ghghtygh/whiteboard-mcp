@@ -82,7 +82,8 @@ npm run dev   # http://localhost:3000/mcp
 `add_group` / `move_group` / `set_group_label` / `remove_group`,
 `apply_operations` (배치 — 아래 참고)
 
-**부가 기능**: `list_catalog` (인증 불필요), `save_as_board` (호출자 본인 토큰 필요)
+**부가 기능**: `list_catalog` (인증 불필요), `save_as_board` (호출자 본인 토큰 필요),
+`render_graph` (ChatGPT 등에서 인터랙티브 위젯으로 표시 — 아래 참고)
 
 노드 삭제 시 연결된 엣지 정리, 그룹 생성/이동 시 노드 자동 편입 같은 cross-cutting 규칙은
 `src/board/ops.ts` 안에서 보장된다 — 도구 핸들러가 직접 배열을 만지지 않는다.
@@ -152,6 +153,33 @@ npm run dev   # http://localhost:3000/mcp
    그대로), 편집할 때마다 주소창 URL 이 실시간으로 그 상태를 반영하도록 갱신된다 —
    PlantUML 에디터가 텍스트를 고치면 URL 이 따라 바뀌는 것과 같은 동작.
 3. "Copy link" 로 현재 상태의 URL 을 복사해 공유한다.
+
+## `render_graph` — ChatGPT Apps SDK 위젯 (뷰어 전용, 1차 스코프)
+
+`get_graph`/`add_node` 같은 데이터 도구와 UI 도구를 분리했다 — 모든 mutation 에 위젯을
+붙이면 노드 하나 추가할 때마다 iframe 이 다시 렌더링돼 버리므로, `render_graph` 는
+사용자가 명시적으로 결과를 보고 싶을 때만 한 번 부르는 도구다(`McpServer` 의
+`instructions` 에도 이 사용법을 명시해 뒀다).
+
+- `src/tools/render.ts` 가 `ui://whiteboard/graph.html` 리소스(`text/html;profile=mcp-app`)를
+  등록하고, `render_graph` 도구의 `_meta` 로 그 리소스를 가리킨다.
+- 위젯(`src/ui/widgetHtml.ts`)은 React/Konva 를 쓰지 않는 순수 HTML/SVG/JS다 — ChatGPT 가
+  로드하는 샌드박스 iframe 은 빌드 단계 없이 정적 리소스를 그대로 실행하므로,
+  whiteboard-web 의 실제 `Canvas` 컴포넌트(React+Konva 번들)를 그대로 재사용할 수 없다.
+  대신 같은 데이터(노드/엣지/그룹)를 그리는 작은 SVG 렌더러를 새로 짰다 — 픽셀 단위로
+  똑같진 않지만 구조는 동일하다.
+- **1차 스코프는 뷰어 전용이다** — pan(드래그)/zoom(휠)만 가능하고 노드 이동·생성·삭제는
+  없다. 위젯에서 `move_node` 등을 다시 호출하는(양방향 편집) 건 2차 이후 과제로 남겨뒀다.
+- 위젯은 `window.openai.toolOutput` (render_graph 가 반환한 structuredContent)에서 데이터를
+  읽는다. **이 계약(정확한 전역 객체/이벤트 이름)은 이 저장소 환경에서 OpenAI 의 라이브
+  문서를 fetch 할 수 없어 학습 시점 지식 기준으로 작성했다** — ChatGPT 에서 실제로 확인해
+  위젯이 비어 있거나 데이터를 못 읽으면 `src/ui/widgetHtml.ts` 의 `getGlobals()`/
+  `openai:set_globals` 리스너 부분과 `src/tools/render.ts` 의 `_meta`(`ui.resourceUri` /
+  `openai/outputTemplate` 둘 다 넣어뒀다)부터 의심할 것. Claude 등 위젯을 모르는 클라이언트는
+  `structuredContent.url`(=`/view/{token}`)로 그냥 열어보면 된다.
+- 로컬에서 mock `window.openai.toolOutput` 을 주입해 Playwright 로 렌더링 자체(노드 박스,
+  화살표 방향/스타일, 그룹 경계, pan/zoom)는 검증했다 — ChatGPT 안에서 실제로 데이터가
+  전달되는지는 검증 못 했다.
 
 ## 왜 이게 안전한가 / 한계
 

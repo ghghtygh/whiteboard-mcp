@@ -3,6 +3,7 @@ import { registerGraphTools } from './tools/graph.js'
 import { registerCatalogTools } from './tools/catalog.js'
 import { registerSaveTools } from './tools/save.js'
 import { registerApplyOperationsTool } from './tools/applyOperations.js'
+import { registerRenderTool } from './tools/render.js'
 
 const INSTRUCTIONS = `
 This server edits a "graph" (nodes, edges and groups for a whiteboard diagram) that is never
@@ -28,6 +29,9 @@ and must pass into the next one.
 - save_as_board is optional: it copies the graph into a real, permanently saved whiteboard-web
   board under the caller's own account (needs their own access token/PAT) — use it only when the
   user wants to keep collaborating on this beyond the current conversation.
+- render_graph shows an interactive widget where supported (e.g. ChatGPT). Call it once when a
+  diagram is ready to show, not after every individual edit — keep editing with the other tools
+  first, then render.
 `.trim()
 
 /**
@@ -43,6 +47,7 @@ export function createGraphMcpServer(): McpServer {
   registerCatalogTools(server)
   registerApplyOperationsTool(server)
   registerSaveTools(server)
+  registerRenderTool(server)
 
   return server
 }
