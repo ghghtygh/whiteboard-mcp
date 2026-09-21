@@ -33,7 +33,19 @@ export function registerRenderTool(server: McpServer) {
   server.registerResource(
     'whiteboard-graph-widget',
     WIDGET_URI,
-    { mimeType: 'text/html;profile=mcp-app' },
+    {
+      mimeType: 'text/html;profile=mcp-app',
+      // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 막는다 — 노드 아이콘
+      // <image href>가 WHITEBOARD_WEB_ORIGIN(/api/v1/icons/*.svg)을 가리키므로 이 도메인을
+      // 명시적으로 허용해야 한다. 필드명(openai/widgetCSP)은 라이브 문서 fetch 가 막혀 있어
+      // 확인이 안 된 상태 — 위젯 아이콘이 계속 깨져 보이면 여기부터 의심할 것.
+      _meta: {
+        'openai/widgetCSP': {
+          connect_domains: [WHITEBOARD_WEB_ORIGIN],
+          resource_domains: [WHITEBOARD_WEB_ORIGIN],
+        },
+      },
+    },
     async () => ({
       contents: [{ uri: WIDGET_URI, mimeType: 'text/html;profile=mcp-app', text: WIDGET_HTML }],
     }),
