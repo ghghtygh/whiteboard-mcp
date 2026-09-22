@@ -25,21 +25,26 @@ export function registerRenderTool(server: McpServer) {
   server.registerResource(
     'whiteboard-graph-widget',
     WIDGET_URI,
-    {
-      mimeType: 'text/html;profile=mcp-app',
-      // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 막는다. 노드 아이콘은 더
-      // 이상 외부 URL 을 참조하지 않고(아래 render_graph 에서 data: URI 로 인라인) 이 문제를
-      // 원천적으로 피하지만, 혹시 모를 다른 외부 참조를 위해 도메인 허용도 함께 선언해 둔다.
-      // 필드명(openai/widgetCSP)은 라이브 문서 fetch 가 막혀 있어 확인이 안 된 상태.
-      _meta: {
-        'openai/widgetCSP': {
-          connect_domains: [WHITEBOARD_WEB_ORIGIN],
-          resource_domains: [WHITEBOARD_WEB_ORIGIN],
-        },
-      },
-    },
+    { mimeType: 'text/html;profile=mcp-app' },
     async () => ({
-      contents: [{ uri: WIDGET_URI, mimeType: 'text/html;profile=mcp-app', text: WIDGET_HTML }],
+      contents: [
+        {
+          uri: WIDGET_URI,
+          mimeType: 'text/html;profile=mcp-app',
+          text: WIDGET_HTML,
+          // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 CSP 로 막는다(실측: img-src
+          // 에 data: 는 있지만 임의 https 도메인은 없음). 노드 아이콘은 이제 외부 URL 을 아예
+          // 참조하지 않고(render_graph 가 data: URI 로 인라인) 이 문제를 원천적으로 피하지만,
+          // 혹시 모를 다른 외부 참조를 위해 도메인 허용도 함께 선언해 둔다. Apps SDK 예제에 따르면
+          // widgetCSP 는 (resource 등록 config 가 아니라) 이 content 항목의 _meta 에 실어야 한다.
+          _meta: {
+            'openai/widgetCSP': {
+              connect_domains: [WHITEBOARD_WEB_ORIGIN],
+              resource_domains: [WHITEBOARD_WEB_ORIGIN],
+            },
+          },
+        },
+      ],
     }),
   )
 
