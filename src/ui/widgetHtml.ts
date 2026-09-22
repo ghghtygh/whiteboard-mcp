@@ -133,18 +133,18 @@ export const WIDGET_HTML = `<!doctype html>
           }
         });
 
-        var ICON_BOX = 56, ICON_PAD = 8;
+        var ICON_BOX = 64, ICON_SIZE = 48;
         nodes.forEach(function (node) {
           var box = boxOf(node);
           nodesG.appendChild(el('rect', { class: 'node-box', x: box.x, y: box.y, width: box.w, height: ICON_BOX, rx: 10 }));
-          if (node.iconDataUri) {
+          if (node.icon) {
             var img = el('image', {
               class: 'node-icon',
-              x: box.x + ICON_PAD, y: box.y + ICON_PAD,
-              width: ICON_BOX - ICON_PAD * 2, height: ICON_BOX - ICON_PAD * 2,
-              href: node.iconDataUri,
+              x: box.cx - ICON_SIZE / 2, y: box.y + (ICON_BOX - ICON_SIZE) / 2,
+              width: ICON_SIZE, height: ICON_SIZE,
+              href: node.icon,
             });
-            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.iconDataUri); // 구형 렌더러 호환
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.icon); // 구형 렌더러 호환
             nodesG.appendChild(img);
           }
           nodesG.appendChild(el('text', {
