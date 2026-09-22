@@ -2,22 +2,14 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { decodeGraph } from '../board/graphCodec.js'
 import { viewUrl, WHITEBOARD_WEB_ORIGIN } from '../config.js'
+import { getIconDataUri } from '../board/iconCache.js'
 import { edgeSchema, graphArg, groupSchema, nodeSchema } from './schemas.js'
 import { withErrorHandling } from './util.js'
 import { WIDGET_HTML } from '../ui/widgetHtml.js'
 
 const WIDGET_URI = 'ui://whiteboard/graph.html'
 
-/** 노드 아이콘 배지(색상+이니셜) — whiteboard-server 가 어떤 카탈로그 타입에든 항상 만들어주는
- * 폴백 SVG다. 실제 브랜드 로고(devicon/simple-icons)는 whiteboard-web 번들 안에만 있어 이
- * 위젯(정적 HTML, 빌드 단계 없음)에서는 못 쓴다 — 위젯은 항상 이 배지로 보인다. 위젯은
- * whiteboard-server 를 직접 호출하지 않는 사용자 브라우저에서 도니, 클러스터 내부 전용인
- * WHITEBOARD_API_ORIGIN 이 아니라 공개 오리진(WHITEBOARD_WEB_ORIGIN)의 /api 경로를 쓴다. */
-function iconUrl(type: string): string {
-  return `${WHITEBOARD_WEB_ORIGIN}/api/v1/icons/${encodeURIComponent(type)}.svg`
-}
-
-const widgetNodeSchema = nodeSchema.extend({ iconUrl: z.string() })
+const widgetNodeSchema = nodeSchema.extend({ iconDataUri: z.string().nullable() })
 
 /**
  * render_graph — 1차 스코프는 "뷰어만, 편집 없음"(ChatGPT Apps SDK 위젯, pan/zoom 만).
@@ -35,10 +27,10 @@ export function registerRenderTool(server: McpServer) {
     WIDGET_URI,
     {
       mimeType: 'text/html;profile=mcp-app',
-      // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 막는다 — 노드 아이콘
-      // <image href>가 WHITEBOARD_WEB_ORIGIN(/api/v1/icons/*.svg)을 가리키므로 이 도메인을
-      // 명시적으로 허용해야 한다. 필드명(openai/widgetCSP)은 라이브 문서 fetch 가 막혀 있어
-      // 확인이 안 된 상태 — 위젯 아이콘이 계속 깨져 보이면 여기부터 의심할 것.
+      // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 막는다. 노드 아이콘은 더
+      // 이상 외부 URL 을 참조하지 않고(아래 render_graph 에서 data: URI 로 인라인) 이 문제를
+      // 원천적으로 피하지만, 혹시 모를 다른 외부 참조를 위해 도메인 허용도 함께 선언해 둔다.
+      // 필드명(openai/widgetCSP)은 라이브 문서 fetch 가 막혀 있어 확인이 안 된 상태.
       _meta: {
         'openai/widgetCSP': {
           connect_domains: [WHITEBOARD_WEB_ORIGIN],
@@ -77,7 +69,12 @@ export function registerRenderTool(server: McpServer) {
     withErrorHandling(async ({ graph }) => {
       const decoded = decodeGraph(graph)
       const url = viewUrl(graph)
-      const nodes = decoded.nodes.map((node) => ({ ...node, iconUrl: iconUrl(node.type) }))
+      // 위젯이 직접 외부 URL 을 fetch 하게 하지 않고, 이 서버가 대신 내부망으로 아이콘 SVG를
+      // 가져와 data: URI 로 인라인해서 넘긴다 — ChatGPT 위젯 iframe(oaiusercontent.com 샌드박스
+      // 오리진)에서 쏜 요청이 wb.gpglab.site 쪽 referrer 체크에 막히는 문제를 원천적으로 피한다.
+      const types = [...new Set(decoded.nodes.map((node) => node.type))]
+      const iconByType = new Map(await Promise.all(types.map(async (type) => [type, await getIconDataUri(type)] as const)))
+      const nodes = decoded.nodes.map((node) => ({ ...node, iconDataUri: iconByType.get(node.type) ?? null }))
       const summary =
         `Whiteboard with ${decoded.nodes.length} node(s), ${decoded.edges.length} edge(s), ` +
         `${decoded.groups.length} group(s). Non-widget clients: open ${url} to view it.`

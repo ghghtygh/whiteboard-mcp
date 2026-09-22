@@ -137,14 +137,14 @@ export const WIDGET_HTML = `<!doctype html>
         nodes.forEach(function (node) {
           var box = boxOf(node);
           nodesG.appendChild(el('rect', { class: 'node-box', x: box.x, y: box.y, width: box.w, height: ICON_BOX, rx: 10 }));
-          if (node.iconUrl) {
+          if (node.iconDataUri) {
             var img = el('image', {
               class: 'node-icon',
               x: box.x + ICON_PAD, y: box.y + ICON_PAD,
               width: ICON_BOX - ICON_PAD * 2, height: ICON_BOX - ICON_PAD * 2,
-              href: node.iconUrl,
+              href: node.iconDataUri,
             });
-            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.iconUrl); // 구형 렌더러 호환
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.iconDataUri); // 구형 렌더러 호환
             nodesG.appendChild(img);
           }
           nodesG.appendChild(el('text', {

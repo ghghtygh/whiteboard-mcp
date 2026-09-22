@@ -110,3 +110,12 @@ export async function listCatalog(type?: string): Promise<CatalogComponentDto[]>
   }
   return (payload as ApiSuccess<CatalogComponentDto[]>).data
 }
+
+/** 아이콘 뱃지 SVG 원문(JSON 래퍼 없이 순수 SVG). 인증 불필요(permitAll). */
+export async function fetchIconSvg(type: string): Promise<string> {
+  const res = await fetch(`${WHITEBOARD_API_ORIGIN}/api/v1/icons/${encodeURIComponent(type)}.svg`)
+  if (!res.ok) {
+    throw new WhiteboardApiError(`icon request failed (${res.status})`, res.status)
+  }
+  return res.text()
+}
