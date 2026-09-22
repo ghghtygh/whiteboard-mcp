@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { decodeGraph } from '../board/graphCodec.js'
 import { viewUrl, WHITEBOARD_WEB_ORIGIN } from '../config.js'
 import { getIconDataUri } from '../board/iconCache.js'
-import { devIconUrl, simpleIconDataUri } from '../board/catalogIcons.js'
+import { devIconDataUri, simpleIconDataUri } from '../board/catalogIcons.js'
 import { edgeSchema, graphArg, groupSchema, nodeSchema } from './schemas.js'
 import { withErrorHandling } from './util.js'
 import { WIDGET_HTML } from '../ui/widgetHtml.js'
@@ -14,13 +14,15 @@ const widgetNodeSchema = nodeSchema.extend({ icon: z.string().nullable() })
 
 /**
  * 노드 타입의 아이콘을 우선순위대로 시도한다 — whiteboard-web(src/canvas/icons.ts)과 동일한
- * 순서: devicon(브랜드 원본 색상, jsdelivr CDN 직링크 — 이 서버를 거치지 않음) → simple-icons
- * (무채색이라 이 서버가 hex 색을 입혀서 data: URI로) → whiteboard-server 색상+이니셜 폴백 배지.
+ * 순서: devicon → simple-icons(둘 다 이 서버에 번들된 로컬 파일, data: URI로 인라인) →
+ * whiteboard-server 색상+이니셜 폴백 배지. 셋 다 data: URI 로 귀결되는 이유는
+ * board/catalogIcons.ts 상단 주석 참고 — 외부 URL 이미지가 ChatGPT 위젯 iframe 에서 (CSP 로는
+ * 허용된 도메인이어도) 렌더링이 안 되는 걸 실측으로 확인했다.
  */
 async function resolveIcon(type: string): Promise<string | null> {
-  const dev = devIconUrl(type)
+  const dev = devIconDataUri(type)
   if (dev) return dev
-  const simple = await simpleIconDataUri(type)
+  const simple = simpleIconDataUri(type)
   if (simple) return simple
   return getIconDataUri(type)
 }
@@ -46,17 +48,17 @@ export function registerRenderTool(server: McpServer) {
           uri: WIDGET_URI,
           mimeType: 'text/html;profile=mcp-app',
           text: WIDGET_HTML,
-          // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 CSP 로 막는다(실측: img-src
-          // 에 data: 와 cdn.jsdelivr.net 은 기본 허용, 그 외 임의 https 도메인은 없음). 노드
-          // 아이콘은 devicon(jsdelivr, 기본 허용) → simple-icons(이 서버가 색을 입혀 data: URI로
-          // 인라인) → whiteboard-server 폴백 배지(data: URI로 인라인) 순으로 CSP 를 통과하게
-          // 짰지만, wb.gpglab.site 는 기본 허용 목록에 없으니 혹시 모를 외부 참조를 위해 도메인
-          // 허용을 남겨둔다. Apps SDK 예제에 따르면 widgetCSP 는 (resource 등록 config 가 아니라)
-          // 이 content 항목의 _meta 에 실어야 한다.
+          // ChatGPT 위젯 iframe 은 기본적으로 외부 도메인 리소스 로딩을 CSP 로 막고, 심지어
+          // CSP 로 허용된 외부 도메인(cdn.jsdelivr.net)이어도 실제로는 이미지가 안 뜨는 걸
+          // 확인했다(board/catalogIcons.ts 참고) — 그래서 노드 아이콘은 전부 data: URI 로
+          // 인라인하는 쪽으로 바꿨고 더 이상 이 선언에 의존하지 않는다. wb.gpglab.site 는 CSP
+          // 기본 허용 목록에 없으니, 혹시 위젯이 나중에 다른 외부 리소스를 참조하게 될 경우를
+          // 대비해서만 남겨둔다. Apps SDK 예제에 따르면 widgetCSP 는 (resource 등록 config 가
+          // 아니라) 이 content 항목의 _meta 에 실어야 한다.
           _meta: {
             'openai/widgetCSP': {
               connect_domains: [WHITEBOARD_WEB_ORIGIN],
-              resource_domains: [WHITEBOARD_WEB_ORIGIN, 'https://cdn.jsdelivr.net'],
+              resource_domains: [WHITEBOARD_WEB_ORIGIN],
             },
           },
         },

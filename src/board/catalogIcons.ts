@@ -1,15 +1,22 @@
+import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+
 // whiteboard-web(src/canvas/icons.ts)이 쓰는 devicon/simple-icons 매핑을 그대로 옮겨왔다 —
 // 두 파일이 서로 다른 런타임(Vite 번들 vs Node)이라 공유 패키지로 뽑지 않고 수동 동기화한다.
 // whiteboard-web 쪽 매핑이 바뀌면 이 파일도 같이 갱신해야 한다.
 //
-// devicon 은 브랜드 색이 이미 입혀진 "-original.svg" 파일을 jsdelivr CDN에서 직접 참조한다 —
-// 위젯 iframe 이 그 요청을 직접 쏘고(CSP img-src 에 cdn.jsdelivr.net 허용돼 있음), 이 서버는
-// 전혀 관여하지 않는다. simple-icons 는 파일 자체가 무채색이라 이 서버가 대신 가져와 브랜드
-// hex 색을 입힌 뒤 data: URI 로 인라인한다(whiteboard-web 이 클라이언트에서 하는 것과 동일한
-// 방식을 서버에서 수행).
+// 처음엔 jsdelivr CDN에서 아이콘을 직접 fetch(런타임 또는 위젯 iframe에서)했는데, ChatGPT
+// 위젯 iframe 안에서 실제로 테스트해보니 외부 URL 이미지가 (CSP 로는 허용된 도메인인데도)
+// 그냥 빈 흰 칸으로만 뜨는 문제가 있었다 — 반면 data: URI 로 인라인한 아이콘은 확실히 렌더링
+// 되는 걸 이미 확인했다. 그래서 devicon/simple-icons 를 이 서버의 실제 npm 의존성으로 번들해
+// (whiteboard-web 이 자기 프론트엔드 번들에 넣는 것과 동일한 방식) 빌드에 포함된 로컬 파일을
+// 읽어 data: URI 로 인라인한다 — 런타임 네트워크 호출이 전혀 없다(빠르고, 외부 CDN 가용성에
+// 의존하지 않음). 두 패키지 다 MIT 라이선스라 이렇게 번들하는 데 별도 라이선스 문제 없다.
 
-const DEVICON_VERSION = '2.17.0'
-const SIMPLE_ICONS_VERSION = '16.19.0'
+// simple-icons 는 package.json 의 exports 맵이 "./icons/*" 서브패스만 노출하고
+// "./package.json" 자체는 막아둬서, 패키지 루트 디렉터리를 먼저 구하는 방식이 아니라
+// 아이콘 파일마다 그 서브패스로 직접 resolve 한다(devicon 은 exports 제한이 없어 상관없음).
+const require = createRequire(import.meta.url)
 
 const DEV_PATHS: Record<string, string> = {
   jenkins: 'jenkins/jenkins-original.svg',
@@ -70,29 +77,43 @@ const SIMPLE_ICONS: Record<string, { slug: string; hex: string }> = {
   ceph: { slug: 'ceph', hex: 'EF5C55' },
 }
 
-export function devIconUrl(type: string): string | null {
-  const path = DEV_PATHS[type]
-  return path ? `https://cdn.jsdelivr.net/npm/devicon@${DEVICON_VERSION}/icons/${path}` : null
+const dataUriCache = new Map<string, string | null>()
+
+function svgToDataUri(svg: string): string {
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`
 }
 
-const simpleIconCache = new Map<string, { dataUri: string; expiresAt: number }>()
-const TTL_MS = 5 * 60_000
-
-/** simple-icons 는 무채색 svg라 브랜드 hex를 fill로 입힌 뒤 data: URI로 돌려준다. */
-export async function simpleIconDataUri(type: string): Promise<string | null> {
-  const entry = SIMPLE_ICONS[type]
-  if (!entry) return null
-  const hit = simpleIconCache.get(type)
-  if (hit && hit.expiresAt > Date.now()) return hit.dataUri
+/** devicon 은 이미 브랜드 색이 입혀진 파일이라 그대로 인라인한다. */
+export function devIconDataUri(type: string): string | null {
+  const hit = dataUriCache.get(`dev:${type}`)
+  if (hit !== undefined) return hit
+  const path = DEV_PATHS[type]
+  if (!path) return null
   try {
-    const res = await fetch(`https://cdn.jsdelivr.net/npm/simple-icons@${SIMPLE_ICONS_VERSION}/icons/${entry.slug}.svg`)
-    if (!res.ok) return null
-    const svg = await res.text()
-    const colored = svg.replace(/<svg([^>]*)>/, `<svg$1 fill="#${entry.hex}">`)
-    const dataUri = `data:image/svg+xml;base64,${Buffer.from(colored, 'utf-8').toString('base64')}`
-    simpleIconCache.set(type, { dataUri, expiresAt: Date.now() + TTL_MS })
+    const svg = readFileSync(require.resolve(`devicon/icons/${path}`), 'utf-8')
+    const dataUri = svgToDataUri(svg)
+    dataUriCache.set(`dev:${type}`, dataUri)
     return dataUri
   } catch {
+    dataUriCache.set(`dev:${type}`, null)
+    return null
+  }
+}
+
+/** simple-icons 파일 자체는 무채색이라 브랜드 hex 를 fill 로 입힌 뒤 인라인한다. */
+export function simpleIconDataUri(type: string): string | null {
+  const hit = dataUriCache.get(`si:${type}`)
+  if (hit !== undefined) return hit
+  const entry = SIMPLE_ICONS[type]
+  if (!entry) return null
+  try {
+    const svg = readFileSync(require.resolve(`simple-icons/icons/${entry.slug}.svg`), 'utf-8')
+    const colored = svg.replace(/<svg([^>]*)>/, `<svg$1 fill="#${entry.hex}">`)
+    const dataUri = svgToDataUri(colored)
+    dataUriCache.set(`si:${type}`, dataUri)
+    return dataUri
+  } catch {
+    dataUriCache.set(`si:${type}`, null)
     return null
   }
 }
