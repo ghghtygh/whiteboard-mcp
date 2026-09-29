@@ -1,5 +1,12 @@
 # whiteboard-mcp
 
+**Whiteboard** 그래프를 MCP 툴콜만으로 만들고 공유하는 stateless 서버. Claude 같은 MCP
+클라이언트가 대화 중에 소프트웨어 아키텍처 다이어그램을 직접 그리고, 링크 하나로 공유할 수 있습니다.
+
+🔗 뷰어: [wb.gpglab.site](http://wb.gpglab.site/) · 🛠 Node.js · TypeScript · MCP (Streamable HTTP)
+
+---
+
 `../whiteboard-web` 스타일의 그래프(노드/엣지/그룹)를 [MCP](https://modelcontextprotocol.io)
 클라이언트(Claude 등)로 만들고 공유하는 remote MCP 서버. Node.js / TypeScript, Streamable
 HTTP 전송.
